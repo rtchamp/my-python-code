@@ -1,0 +1,23 @@
+CURRENT_DIR := $(shell pwd)
+TARGET_DIR := /path/to/target/directory
+
+.PHONY: run-in-target-dir prepare-target-dir run-command
+
+run-in-target-dir: prepare-target-dir
+    @echo "Makefile 위치: $(CURRENT_DIR)"
+    @echo "타겟 디렉토리: $(TARGET_DIR)"
+    $(MAKE) -C $(TARGET_DIR) run-command
+
+prepare-target-dir:
+    @echo "타겟 디렉토리 준비 중..."
+    @if [ -d "$(TARGET_DIR)" ]; then \
+        echo "기존 디렉토리 삭제 중..."; \
+        rm -rf "$(TARGET_DIR)"; \
+    fi
+    @echo "새 디렉토리 생성 중..."
+    @mkdir -p "$(TARGET_DIR)"
+
+run-command:
+    @echo "현재 작업 디렉토리: $$(pwd)"
+    @echo "이 명령은 $(TARGET_DIR)에서 실행되지만, Makefile은 $(CURRENT_DIR)에 있습니다."
+    # 여기에 실행하고자 하는 명령어를 넣으세요
