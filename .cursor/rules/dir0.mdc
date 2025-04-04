@@ -1,0 +1,14 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Your rule content
+
+- You can @ files here
+- You can use markdown but dont have to
+  이 프로젝트는 내가 작은 코드블럭을 실험하는 용도야.
+  새로운 기능이 필요하면 새로운 디렉토리에 새로운 파일 안에 구현할꺼야.
+  그리고 각 폴더안에 어떤 목적으로 했는지 각각 README.md를 만들어주고 적절하게 업데이트도 같이 해줘
+  모든 주석은 영어로 작성해줘
