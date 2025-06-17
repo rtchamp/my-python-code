@@ -1,0 +1,93 @@
+---
+description: Guidelines for creating and maintaining Cursor rules to ensure consistency and effectiveness.
+globs: .cursor/rules/*.mdc
+alwaysApply: true
+---
+---
+description: SQLAlchemy ORM 테이블명은 항상 'tbl_' prefix와 단수형 명사로 작성해야 한다
+globs: src/**/*.py, models/**/*.py
+alwaysApply: true
+---
+
+- **SQLAlchemy ORM 테이블 네이밍 규칙**
+  - 테이블명은 반드시 `tbl_`로 시작해야 한다
+  - `tbl_` 뒤에는 단수형 명사가 와야 한다 (예: `tbl_user`, `tbl_document`)
+  - 복수형, 약어, 불명확한 이름 사용 금지
+  - 예시:
+    ```python
+    class User(Base):
+        __tablename__ = 'tbl_user'  # ✅
+    class Document(Base):
+        __tablename__ = 'tbl_document'  # ✅
+    class Users(Base):
+        __tablename__ = 'tbl_users'  # ❌ (복수형 금지)
+    class Doc(Base):
+        __tablename__ = 'tbl_doc'  # ❌ (약어 금지)
+    ```
+
+- **Required Rule Structure:**
+  ```markdown
+  ---
+  description: Clear, one-line description of what the rule enforces
+  globs: path/to/files/*.ext, other/path/**/*
+  alwaysApply: boolean
+  ---
+
+  - **Main Points in Bold**
+    - Sub-points with details
+    - Examples and explanations
+  ```
+
+- **File References:**
+  - Use `[filename](mdc:path/to/file)` ([filename](mdc:filename)) to reference files
+  - Example: [prisma.mdc](mdc:.cursor/rules/prisma.mdc) for rule references
+  - Example: [schema.prisma](mdc:prisma/schema.prisma) for code references
+
+- **Code Examples:**
+  - Use language-specific code blocks
+  ```typescript
+  // ✅ DO: Show good examples
+  const goodExample = true;
+  
+  // ❌ DON'T: Show anti-patterns
+  const badExample = false;
+  ```
+
+- **Rule Content Guidelines:**
+  - Start with high-level overview
+  - Include specific, actionable requirements
+  - Show examples of correct implementation
+  - Reference existing code when possible
+  - Keep rules DRY by referencing other rules
+
+- **Rule Maintenance:**
+  - Update rules when new patterns emerge
+  - Add examples from actual codebase
+  - Remove outdated patterns
+  - Cross-reference related rules
+
+- **Best Practices:**
+  - Use bullet points for clarity
+  - Keep descriptions concise
+  - Include both DO and DON'T examples
+  - Reference actual code over theoretical examples
+  - Use consistent formatting across rules 
+
+---
+description: SQLAlchemy ORM 모델은 2.0 스타일(type hint + mapped_column)로 정의해야 한다
+globs: src/**/*.py, models/**/*.py
+alwaysApply: true
+---
+
+- **SQLAlchemy 2.0 ORM 모델 정의 규칙**
+  - 모든 ORM 모델 필드는 type hint와 mapped_column을 사용해 정의해야 한다
+  - 예시:
+    ```python
+    from sqlalchemy.orm import Mapped, mapped_column
+    class User(Base):
+        __tablename__ = 'tbl_user'
+        id: Mapped[int] = mapped_column(primary_key=True)
+        name: Mapped[str] = mapped_column(nullable=False, length=100)
+    ```
+  - Column, Integer, String 등 1.x 스타일의 필드 정의는 사용하지 않는다
+  - ReprMixin, 불필요한 relationship import 등은 제거한다 

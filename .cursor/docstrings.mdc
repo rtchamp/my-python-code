@@ -1,0 +1,60 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Docstring and __init__.py Policy
+
+- **DO NOT add docstrings unless explicitly requested**
+  - Functions, classes, methods should have no docstrings by default
+  - Type hints and clear function/variable names provide sufficient documentation
+  - Docstrings add noise and maintenance overhead
+
+- **__init__.py files should be minimal**
+  - DO NOT include `__all__` lists unless explicitly needed for public API
+  - DO NOT include `__version__` unless explicitly needed
+  - Keep imports and exports simple and clean
+  - Focus on functionality over metadata
+
+- **Examples:**
+
+```python
+# ✅ DO: Clean function without docstring
+def create_user(name: str, email: str) -> User:
+    return User(name=name, email=email)
+
+# ✅ DO: Class without docstring
+class UserManager:
+    def __init__(self, database: Database):
+        self.database = database
+
+# ✅ DO: Minimal __init__.py
+from .models import Node, Edge
+from .core import GraphManager
+
+# ❌ DON'T: Adding docstrings automatically
+def create_user(name: str, email: str) -> User:
+    """Create a new user with the given name and email."""
+    return User(name=name, email=email)
+
+# ❌ DON'T: Unnecessary __all__ and __version__
+__version__ = "0.1.0"
+__all__ = ['Node', 'Edge', 'GraphManager']
+```
+
+- **Only add docstrings when:**
+  - User explicitly asks for documentation
+  - Complex algorithms that need explanation
+  - Public API that requires detailed documentation
+  - Module-level docstrings for package documentation
+
+- **Only add __all__ and __version__ when:**
+  - User explicitly requests them
+  - Building a public package that needs strict API control
+  - Version information is actually used in the application
+
+- **Code should be self-documenting through:**
+  - Clear function and variable names
+  - Type hints for all parameters and returns
+  - Well-structured code organization
+  - Comments for complex logic (not docstrings)
