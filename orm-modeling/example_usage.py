@@ -1,10 +1,9 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 from orm import Base, Point, Line
 from service import NetworkGraphBuilder
+from db import DatabaseManager
 
-engine = create_engine("sqlite:///:memory:", echo=True)
-Base.metadata.create_all(engine)
+db_manager = DatabaseManager("sqlite:///:memory:", echo=True)
+db_manager.initialize()
 
 coordinate_pairs = [
     ((0.0, 0.0), (10.0, 0.0)),
@@ -12,7 +11,7 @@ coordinate_pairs = [
     ((2.0, -1.0), (8.0, 1.0)),
 ]
 
-with Session(engine) as session:
+with db_manager.get_session() as session:
     builder = NetworkGraphBuilder(session)
     
     lines = builder.create_lines_from_coordinates(coordinate_pairs)
@@ -51,4 +50,7 @@ with Session(engine) as session:
     graph = builder.create_igraph()
     print(f"\nCreated igraph with {graph.vcount()} vertices and {graph.ecount()} edges")
     print(f"Vertex names: {graph.vs['name']}")
-    print(f"Edges: {graph.get_edgelist()}") 
+    print(f"Edges: {graph.get_edgelist()}")
+
+print(f"\nDatabase info: {db_manager.get_info()}")
+db_manager.close() 
