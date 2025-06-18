@@ -182,15 +182,34 @@ class NetworkGraphBuilder:
         return graph
 
     def get_all_endpoint_paths(self) -> List[Dict]:
-        # Use get_endpoint_pairs() to get all endpoint coordinate pairs
-        endpoint_pairs = self.get_endpoint_pairs()
+        graph = self.create_igraph()
+        
+        # Find endpoints based on graph degree (nodes with only 1 connection)
+        endpoint_indices = [i for i in range(len(graph.vs)) if graph.degree(i) == 1]
         
         all_paths = []
         
-        # Find paths for each endpoint pair
-        for start_coord, end_coord in endpoint_pairs:
-            paths = self.get_paths_between_endpoints(start_coord, end_coord)
-            all_paths.extend(paths)
+        # Find paths between all pairs of endpoints
+        for i, start_idx in enumerate(endpoint_indices):
+            for end_idx in endpoint_indices[i+1:]:  # Avoid duplicate pairs
+                try:
+                    # Find all simple paths between endpoints
+                    paths = graph.get_all_simple_paths(start_idx, end_idx)
+                    
+                    for path_indices in paths:
+                        path_coords = [graph.vs[idx]["coord"] for idx in path_indices]
+                        path_info = {
+                            "start": graph.vs[start_idx]["coord"],
+                            "end": graph.vs[end_idx]["coord"], 
+                            "path": path_coords,
+                            "length": len(path_indices) - 1,  # Number of edges
+                            "vertex_indices": path_indices
+                        }
+                        all_paths.append(path_info)
+                        
+                except Exception:
+                    # No path exists between these endpoints
+                    continue
         
         return all_paths
 
@@ -231,13 +250,16 @@ class NetworkGraphBuilder:
             return []
 
     def get_endpoint_pairs(self) -> List[tuple[tuple[float, float], tuple[float, float]]]:
-        points_stmt = select(Point).where(Point.is_endpoint == True)
-        endpoints = self.session.execute(points_stmt).scalars().all()
+        graph = self.create_igraph()
+        
+        # Find endpoints based on graph degree (nodes with only 1 connection)
+        endpoint_indices = [i for i in range(len(graph.vs)) if graph.degree(i) == 1]
+        endpoint_coords = [graph.vs[i]["coord"] for i in endpoint_indices]
         
         pairs = []
-        for i, point1 in enumerate(endpoints):
-            for point2 in endpoints[i+1:]:
-                pairs.append((point1.coord, point2.coord))
+        for i, coord1 in enumerate(endpoint_coords):
+            for coord2 in endpoint_coords[i+1:]:
+                pairs.append((coord1, coord2))
         
         return pairs
 
