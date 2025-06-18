@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from typing import Dict, Any, Generator
 from sqlalchemy import create_engine, Engine, text, MetaData
 from sqlalchemy.orm import sessionmaker, Session
-from orm import Base
+from .model import Base
 from pathlib import Path
 import shutil
 

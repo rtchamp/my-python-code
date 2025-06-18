@@ -1,6 +1,6 @@
 from sqlalchemy import select, create_engine, and_
 from sqlalchemy.orm import Session
-from model import Base, Point, Line
+from .model import Base, Point, Line
 from shapely.geometry import Point as ShapelyPoint
 
 engine = create_engine("sqlite:///:memory:", echo=True, future=True)

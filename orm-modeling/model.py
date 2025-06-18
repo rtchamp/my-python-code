@@ -14,7 +14,6 @@ class Point(Base):
     x: Mapped[float]
     y: Mapped[float]
     is_merged: Mapped[bool] = mapped_column(default=False)
-    is_endpoint: Mapped[bool] = mapped_column(default=True)
     merged_into_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tbl_point.id"), default=None)
     
     merged_into: Mapped[Optional["Point"]] = relationship("Point", remote_side=[id], back_populates="merged_points")
@@ -37,30 +36,7 @@ class Point(Base):
         other_x, other_y = other_coord
         return ((self.x - other_x) ** 2 + (self.y - other_y) ** 2) ** 0.5
 
-    def update_endpoint_status(self, session):
-        endpoint_count_stmt = select(func.count()).select_from(Line).where(
-            Line.is_split == False
-        ).where(
-            Line.has_endpoint(self.coord)
-        )
-        endpoint_count = session.execute(endpoint_count_stmt).scalar()
-        
-        if endpoint_count == 0:
-            pass
-        elif endpoint_count == 1:
-            self.is_endpoint = True
-        elif endpoint_count == 2:
-            self.is_endpoint = False
-        else:
-            self.is_endpoint = True
 
-    @classmethod
-    def update_all_endpoint_status(cls, session):
-        stmt = select(cls).where(cls.is_merged == False)
-        points = session.execute(stmt).scalars().all()
-        
-        for point in points:
-            point.update_endpoint_status(session)
 
     @property
     def to_shapely(self) -> ShapelyPoint:
@@ -80,7 +56,7 @@ class Line(Base):
     def coords(self) -> tuple[tuple[float, float], tuple[float, float]]:  # type: ignore
         return ((self.x1, self.y1), (self.x2, self.y2))
     
-    @coords.setter  # type: ignore
+    @coords.setter
     def coords(self, value: tuple[tuple[float, float], tuple[float, float]]):  # type: ignore
         (x1, y1), (x2, y2) = value
         self.x1, self.y1, self.x2, self.y2 = x1, y1, x2, y2

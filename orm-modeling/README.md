@@ -12,9 +12,7 @@ The models include sophisticated hybrid properties that work both at the Python 
 - `coord` property: Returns coordinates as `(x, y)` tuple, with SQL expression support
 - `coord_matches(coord)`: Class method for SQL coordinate filtering (accepts `tuple[float, float]`)
 - `distance_to_point(coord)`: Calculate distance to another point (accepts `tuple[float, float]`)
-- `is_endpoint`: Boolean field indicating if point is a line endpoint (True) or middle point (False)
-- `update_endpoint_status(session)`: Update endpoint status based on line relationships
-- `update_all_endpoint_status(session)`: Class method to update all points' endpoint status
+
 - `to_shapely`: Convert to Shapely Point geometry
 
 **Line Model:**
@@ -27,16 +25,19 @@ The models include sophisticated hybrid properties that work both at the Python 
 
 ### Endpoint Classification
 
-The `is_endpoint` field automatically categorizes points based on their role in the network:
+Endpoints are automatically determined by graph degree analysis using igraph:
 
-- **True Endpoints** (`is_endpoint=True`):
-  - Original points created from coordinate pairs
-  - Terminal points (connected to exactly 1 line)
-  - Junction/intersection points (connected to 3+ lines)
+- **True Endpoints** (degree = 1):
+  - Terminal points connected to exactly 1 line
+  - These are the only points considered for pathfinding
 
-- **Middle Points** (`is_endpoint=False`):
-  - Points inserted during line splitting
-  - Connected to exactly 2 lines (continuation points)
+- **Junction Points** (degree ≥ 3):
+  - Intersection points where multiple lines meet
+  - Not considered endpoints for pathfinding purposes
+
+- **Middle Points** (degree = 2):
+  - Continuation points along a path
+  - Not considered endpoints for pathfinding purposes
 
 ## Dependencies
 
@@ -112,28 +113,26 @@ distance = point_geom.distance(line_geom)
 is_near = line_geom.dwithin(point_geom, tolerance=0.1)
 ```
 
-### Endpoint Classification and Filtering
+### Degree-Based Endpoint Detection
 
 ```python
-# Filter points by endpoint status
-endpoint_points = session.execute(
-    select(Point).where(Point.is_endpoint == True)
-).scalars().all()
+# Create graph and analyze node degrees
+builder = NetworkGraphBuilder(session)
+graph = builder.create_igraph()
 
-middle_points = session.execute(
-    select(Point).where(Point.is_endpoint == False)
-).scalars().all()
-
-# Update endpoint status after line operations
-Point.update_all_endpoint_status(session)
-session.commit()
-
-# Check individual point status
-for point in points:
-    if point.is_endpoint:
-        print(f"Endpoint: {point.coord}")
+# Find endpoints based on graph degree
+for i, point in enumerate(points):
+    degree = graph.degree(i)
+    if degree == 1:
+        print(f"Endpoint: {point.coord} (degree={degree})")
+    elif degree == 2:
+        print(f"Middle point: {point.coord} (degree={degree})")
     else:
-        print(f"Middle point: {point.coord}")
+        print(f"Junction: {point.coord} (degree={degree})")
+
+# Get all endpoint pairs automatically
+endpoint_pairs = builder.get_endpoint_pairs()
+print(f"Found {len(endpoint_pairs)} endpoint pairs")
 ```
 
 ### Advanced Service Operations
@@ -203,7 +202,7 @@ The NetworkGraphBuilder service has been refactored to use these hybrid properti
 - `Line.update_endpoint()` encapsulates coordinate update logic
 - `Line.start_coord` and `Line.end_coord` provide cleaner coordinate access
 - **STRtree spatial indexing** for efficient line splitting operations (O(n log n) vs O(n²))
-- **igraph integration** for pathfinding and network analysis operations
+- **igraph integration** for pathfinding and degree-based endpoint detection
 
 ### Performance Optimization
 

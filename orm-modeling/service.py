@@ -23,7 +23,6 @@ class NetworkGraphBuilder:
         for coord in unique_coords:
             if coord not in self._point_cache:
                 point = self._get_or_create_point(coord[0], coord[1])
-                point.is_endpoint = True
                 self._point_cache[coord] = point
         
         for p0, p1 in coordinate_pairs:
@@ -39,14 +38,14 @@ class NetworkGraphBuilder:
         
         return created_lines
     
-    def _get_or_create_point(self, x: float, y: float, is_endpoint: bool = True) -> Point:
+    def _get_or_create_point(self, x: float, y: float) -> Point:
         stmt = select(Point).where(Point.coord_matches((x, y)))
         existing_point = self.session.execute(stmt).scalar_one_or_none()
         
         if existing_point:
             return existing_point
         
-        new_point = Point(x=x, y=y, is_endpoint=is_endpoint)
+        new_point = Point(x=x, y=y)
         self.session.add(new_point)
         self.session.flush()
         
@@ -119,9 +118,7 @@ class NetworkGraphBuilder:
             if points_on_line:
                 line.is_split = True
                 
-                # Mark points that split lines as non-endpoints
-                for point in points_on_line:
-                    point.is_endpoint = False
+                # Points that split lines are automatically handled by degree calculation
                 
                 # Create ordered list of all points along the line
                 all_points = [line.start_coord]
@@ -139,10 +136,6 @@ class NetworkGraphBuilder:
                     self.session.add(new_line)
                     new_lines.append(new_line)
         
-        self.session.commit()
-        
-        # Update all endpoint statuses after splitting
-        Point.update_all_endpoint_status(self.session)
         self.session.commit()
         
         return new_lines
@@ -176,7 +169,6 @@ class NetworkGraphBuilder:
         graph.add_vertices(len(points))
         graph.vs["name"] = vertex_names
         graph.vs["coord"] = [point.coord for point in points]
-        graph.vs["is_endpoint"] = [point.is_endpoint for point in points]
         graph.add_edges(edges)
         
         return graph

@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 from model import Base, Point, Line
 from service import NetworkGraphBuilder
 
-def create_test_network():
+def test_degree_based_endpoints():
+    print("Testing Degree-Based Endpoint Detection (Clean)")
+    print("="*50)
+    
     engine = create_engine("sqlite:///:memory:", echo=False)
     Base.metadata.create_all(engine)
     session = Session(engine)
@@ -17,13 +20,14 @@ def create_test_network():
     session.execute(delete(Point))
     session.commit()
     
-    # Create a simple network: A---B---C---D with branch E---B
+    # Create a test network: A---B---C---D with branch E---B
+    #                       A(degree=1) B(degree=3) C(degree=2) D(degree=1) E(degree=1)
     points_data = [
-        (0.0, 0.0),  # A (endpoint)
-        (1.0, 0.0),  # B (junction)
-        (2.0, 0.0),  # C (middle)
-        (3.0, 0.0),  # D (endpoint)
-        (1.0, 1.0),  # E (endpoint)
+        (0.0, 0.0),  # A
+        (1.0, 0.0),  # B  
+        (2.0, 0.0),  # C
+        (3.0, 0.0),  # D
+        (1.0, 1.0),  # E
     ]
     
     lines_data = [
@@ -45,30 +49,32 @@ def create_test_network():
     
     session.commit()
     
-    # Update endpoint status
+    # Create graph and analyze degrees
     builder = NetworkGraphBuilder(session)
-    Point.update_all_endpoint_status(session)
-    session.commit()
+    graph = builder.create_igraph()
     
-    return session, builder
-
-def test_path_finding():
-    print("Creating test network...")
-    session, builder = create_test_network()
-    
-    print("\n=== Network Structure ===")
-    # Show all points and their status
+    print("\n=== Point Analysis (Degree-Based Only) ===")
     points = session.execute(select(Point)).scalars().all()
-    for point in points:
-        status = "endpoint" if point.is_endpoint else "middle"
-        print(f"Point {point.coord}: {status}")
     
-    print("\n=== All Endpoint Pairs ===")
+    for i, point in enumerate(points):
+        degree = graph.degree(i)
+        is_endpoint_degree = degree == 1
+        
+        node_type = "endpoint" if is_endpoint_degree else f"junction/middle (degree={degree})"
+        
+        print(f"Point {point.coord}:")
+        print(f"  Degree: {degree}")
+        print(f"  Type: {node_type}")
+        print()
+    
+    print("=== Degree-Based Endpoint Pairs ===")
     endpoint_pairs = builder.get_endpoint_pairs()
     for i, (start, end) in enumerate(endpoint_pairs):
         print(f"{i+1}. {start} -> {end}")
     
-    print("\n=== All Paths Between Endpoints ===")
+    print(f"\nTotal endpoint pairs: {len(endpoint_pairs)}")
+    
+    print("\n=== Degree-Based Paths ===")
     all_paths = builder.get_all_endpoint_paths()
     
     for i, path_info in enumerate(all_paths):
@@ -78,24 +84,12 @@ def test_path_finding():
     
     print(f"\nTotal paths found: {len(all_paths)}")
     
-    print("\n=== Specific Path Query ===")
-    # Find paths between specific endpoints
-    start_coord = (0.0, 0.0)  # Point A
-    end_coord = (3.0, 0.0)    # Point D
-    
-    specific_paths = builder.get_paths_between_endpoints(start_coord, end_coord)
-    print(f"Paths from {start_coord} to {end_coord}:")
-    
-    for i, path_info in enumerate(specific_paths):
-        print(f"  Path {i+1}: {' -> '.join([str(coord) for coord in path_info['path']])}")
-        print(f"    Length: {path_info['length']} edges")
-    
     session.close()
 
-def test_complex_network():
-    print("\n" + "="*50)
-    print("Testing Complex Network with Multiple Paths")
-    print("="*50)
+def test_complex_degree_network():
+    print("\n" + "="*60)
+    print("Testing Complex Network (No True Endpoints)")
+    print("="*60)
     
     engine = create_engine("sqlite:///:memory:", echo=False)
     Base.metadata.create_all(engine)
@@ -106,10 +100,12 @@ def test_complex_network():
     session.execute(delete(Point))
     session.commit()
     
-    # Create a more complex network with multiple paths
+    # Create a complex network:
     # A---B---C
     # |   |   |
     # D---E---F
+    # Expected degrees: A(2), B(4), C(2), D(2), E(4), F(2)
+    # All nodes have degree > 1, so no true endpoints!
     
     points_data = [
         (0.0, 2.0),  # A
@@ -142,29 +138,39 @@ def test_complex_network():
     
     session.commit()
     
-    # Update endpoint status
+    # Create graph and analyze degrees
     builder = NetworkGraphBuilder(session)
-    Point.update_all_endpoint_status(session)
-    session.commit()
+    graph = builder.create_igraph()
     
-    print("\n=== Complex Network Structure ===")
+    print("\n=== Complex Network Point Analysis ===")
     points = session.execute(select(Point)).scalars().all()
-    for point in points:
-        status = "endpoint" if point.is_endpoint else "junction"
-        print(f"Point {point.coord}: {status}")
     
-    print("\n=== All Paths in Complex Network ===")
+    for i, point in enumerate(points):
+        degree = graph.degree(i)
+        is_endpoint_degree = degree == 1
+        
+        node_type = "endpoint" if is_endpoint_degree else f"junction/middle (degree={degree})"
+        
+        print(f"Point {point.coord}:")
+        print(f"  Degree: {degree}")
+        print(f"  Type: {node_type}")
+        print()
+    
+    print("=== Degree-Based Endpoint Detection Results ===")
+    endpoint_pairs = builder.get_endpoint_pairs()
+    print(f"Endpoint pairs found: {len(endpoint_pairs)}")
+    
+    if endpoint_pairs:
+        for i, (start, end) in enumerate(endpoint_pairs):
+            print(f"{i+1}. {start} -> {end}")
+    else:
+        print("No endpoints found (all nodes have degree > 1)")
+    
     all_paths = builder.get_all_endpoint_paths()
-    
-    for i, path_info in enumerate(all_paths):
-        print(f"\nPath {i+1}: {path_info['start']} -> {path_info['end']}")
-        print(f"  Route: {' -> '.join([str(coord) for coord in path_info['path']])}")
-        print(f"  Length: {path_info['length']} edges")
-    
-    print(f"\nTotal paths found: {len(all_paths)}")
+    print(f"Paths found: {len(all_paths)}")
     
     session.close()
 
 if __name__ == "__main__":
-    test_path_finding()
-    test_complex_network() 
+    test_degree_based_endpoints()
+    test_complex_degree_network() 

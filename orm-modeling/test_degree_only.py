@@ -8,7 +8,7 @@ from model import Base, Point, Line
 from service import NetworkGraphBuilder
 
 def test_degree_based_endpoints():
-    print("Testing Degree-Based Endpoint Detection")
+    print("Testing Degree-Based Endpoint Detection (Clean)")
     print("="*50)
     
     engine = create_engine("sqlite:///:memory:", echo=False)
@@ -49,29 +49,22 @@ def test_degree_based_endpoints():
     
     session.commit()
     
-    # Update is_endpoint status using traditional method
-    Point.update_all_endpoint_status(session)
-    session.commit()
-    
     # Create graph and analyze degrees
     builder = NetworkGraphBuilder(session)
     graph = builder.create_igraph()
     
-    print("\n=== Point Analysis ===")
+    print("\n=== Point Analysis (Degree-Based Only) ===")
     points = session.execute(select(Point)).scalars().all()
     
     for i, point in enumerate(points):
         degree = graph.degree(i)
-        is_endpoint_field = point.is_endpoint
         is_endpoint_degree = degree == 1
         
-        status = "MATCH" if is_endpoint_field == is_endpoint_degree else "MISMATCH"
+        node_type = "endpoint" if is_endpoint_degree else f"junction/middle (degree={degree})"
         
         print(f"Point {point.coord}:")
         print(f"  Degree: {degree}")
-        print(f"  is_endpoint field: {is_endpoint_field}")
-        print(f"  Degree-based endpoint: {is_endpoint_degree}")
-        print(f"  Status: {status}")
+        print(f"  Type: {node_type}")
         print()
     
     print("=== Degree-Based Endpoint Pairs ===")
@@ -95,7 +88,7 @@ def test_degree_based_endpoints():
 
 def test_complex_degree_network():
     print("\n" + "="*60)
-    print("Testing Complex Network with Degree-Based Detection")
+    print("Testing Complex Network (No True Endpoints)")
     print("="*60)
     
     engine = create_engine("sqlite:///:memory:", echo=False)
@@ -145,10 +138,6 @@ def test_complex_degree_network():
     
     session.commit()
     
-    # Update is_endpoint status using traditional method
-    Point.update_all_endpoint_status(session)
-    session.commit()
-    
     # Create graph and analyze degrees
     builder = NetworkGraphBuilder(session)
     graph = builder.create_igraph()
@@ -158,16 +147,13 @@ def test_complex_degree_network():
     
     for i, point in enumerate(points):
         degree = graph.degree(i)
-        is_endpoint_field = point.is_endpoint
         is_endpoint_degree = degree == 1
         
-        status = "MATCH" if is_endpoint_field == is_endpoint_degree else "MISMATCH"
+        node_type = "endpoint" if is_endpoint_degree else f"junction/middle (degree={degree})"
         
         print(f"Point {point.coord}:")
         print(f"  Degree: {degree}")
-        print(f"  is_endpoint field: {is_endpoint_field}")
-        print(f"  Degree-based endpoint: {is_endpoint_degree}")
-        print(f"  Status: {status}")
+        print(f"  Type: {node_type}")
         print()
     
     print("=== Degree-Based Endpoint Detection Results ===")
