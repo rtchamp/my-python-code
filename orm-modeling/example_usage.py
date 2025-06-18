@@ -1,4 +1,5 @@
-from orm import Base, Point, Line
+from sqlalchemy import select
+from model import Base, Point, Line
 from service import NetworkGraphBuilder
 from db import DatabaseManager
 
@@ -18,22 +19,22 @@ with db_manager.get_session() as session:
     
     print(f"Created {len(lines)} lines")
     
-    points = session.query(Point).all()
+    points = session.execute(select(Point)).scalars().all()
     print(f"Created {len(points)} total points")
     
     for i, point in enumerate(points, 1):
         print(f"Point {i}: {point.coord}")
     
     for i, line in enumerate(lines, 1):
-        print(f"Line {i}: {line.coord}")
+        print(f"Line {i}: {line.coords}")
     
     print("\nSplitting lines on nearby points with tolerance 0.5...")
     new_lines = builder.split_lines_on_points(0.5)
     print(f"Created {len(new_lines)} new line segments")
     
-    all_lines = session.query(Line).all()
-    active_lines = session.query(Line).filter(Line.is_split == False).all()
-    split_lines = session.query(Line).filter(Line.is_split == True).all()
+    all_lines = session.execute(select(Line)).scalars().all()
+    active_lines = session.execute(select(Line).where(Line.is_split == False)).scalars().all()
+    split_lines = session.execute(select(Line).where(Line.is_split == True)).scalars().all()
     
     print(f"\nTotal lines in database: {len(all_lines)}")
     print(f"Active lines: {len(active_lines)}")
@@ -41,11 +42,11 @@ with db_manager.get_session() as session:
     
     print("\nActive lines:")
     for i, line in enumerate(active_lines, 1):
-        print(f"  Line {i}: {line.coord}")
+        print(f"  Line {i}: {line.coords}")
     
     print("\nSplit lines (excluded from graph):")
     for i, line in enumerate(split_lines, 1):
-        print(f"  Split line {i}: {line.coord}")
+        print(f"  Split line {i}: {line.coords}")
     
     graph = builder.create_igraph()
     print(f"\nCreated igraph with {graph.vcount()} vertices and {graph.ecount()} edges")

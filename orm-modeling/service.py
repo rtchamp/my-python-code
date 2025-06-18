@@ -1,10 +1,11 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, select
 from typing import List, Tuple, Dict
 import igraph as ig
 import math
 from shapely.geometry import Point as ShapelyPoint, LineString as ShapelyLineString
-from .orm import Point, Line, Base
+from shapely import STRtree
+from model import Point, Line, Base
 
 class NetworkGraphBuilder:
     def __init__(self, session: Session):
@@ -22,18 +23,15 @@ class NetworkGraphBuilder:
         for coord in unique_coords:
             if coord not in self._point_cache:
                 point = self._get_or_create_point(coord[0], coord[1])
+                point.is_endpoint = True
                 self._point_cache[coord] = point
         
         for p0, p1 in coordinate_pairs:
             point0 = self._point_cache[p0]
             point1 = self._point_cache[p1]
             
-            line = Line(
-                x1=point0.x,
-                y1=point0.y,
-                x2=point1.x,
-                y2=point1.y
-            )
+            line = Line()
+            line.coords = (point0.coord, point1.coord)
             self.session.add(line)
             created_lines.append(line)
         
@@ -41,22 +39,22 @@ class NetworkGraphBuilder:
         
         return created_lines
     
-    def _get_or_create_point(self, x: float, y: float) -> Point:
-        existing_point = self.session.query(Point).filter(
-            Point.x == x, Point.y == y
-        ).first()
+    def _get_or_create_point(self, x: float, y: float, is_endpoint: bool = True) -> Point:
+        stmt = select(Point).where(Point.coord_matches((x, y)))
+        existing_point = self.session.execute(stmt).scalar_one_or_none()
         
         if existing_point:
             return existing_point
         
-        new_point = Point(x=x, y=y)
+        new_point = Point(x=x, y=y, is_endpoint=is_endpoint)
         self.session.add(new_point)
         self.session.flush()
         
         return new_point
     
     def merge_nearby_points(self, margin: float) -> List[Point]:
-        points = self.session.query(Point).filter(Point.is_merged == False).all()
+        stmt = select(Point).where(Point.is_merged == False)
+        points = self.session.execute(stmt).scalars().all()
         merged_points = []
         
         for i, point1 in enumerate(points):
@@ -67,76 +65,94 @@ class NetworkGraphBuilder:
                 if point2.is_merged:
                     continue
                 
-                distance = math.sqrt((point1.x - point2.x)**2 + (point1.y - point2.y)**2)
+                distance = point1.distance_to_point(point2.coord)
                 
                 if distance <= margin:
                     point2.is_merged = True
                     point2.merged_into = point1
                     merged_points.append(point2)
                     
-                    lines_to_update = self.session.query(Line).filter(
-                        and_(
-                            ((Line.x1 == point2.x) & (Line.y1 == point2.y)) |
-                            ((Line.x2 == point2.x) & (Line.y2 == point2.y))
-                        )
-                    ).all()
+                    lines_stmt = select(Line).where(Line.has_endpoint(point2.coord))
+                    lines_to_update = self.session.execute(lines_stmt).scalars().all()
                     
                     for line in lines_to_update:
-                        if line.x1 == point2.x and line.y1 == point2.y:
-                            line.x1 = point1.x
-                            line.y1 = point1.y
-                        if line.x2 == point2.x and line.y2 == point2.y:
-                            line.x2 = point1.x
-                            line.y2 = point1.y
+                        line.update_endpoint(point2.coord, point1.coord)
         
         self.session.commit()
         return merged_points
     
     def split_lines_on_points(self, tolerance: float) -> List[Line]:
-        points = self.session.query(Point).filter(Point.is_merged == False).all()
-        lines = self.session.query(Line).filter(Line.is_split == False).all()
+        points_stmt = select(Point).where(Point.is_merged == False)
+        points = self.session.execute(points_stmt).scalars().all()
+        
+        lines_stmt = select(Line).where(Line.is_split == False)
+        lines = self.session.execute(lines_stmt).scalars().all()
+        
+        if not points or not lines:
+            return []
+        
+        # Create STRtree with point geometries
+        point_geoms = [point.to_shapely for point in points]
+        point_tree = STRtree(point_geoms)
         
         new_lines = []
         
         for line in lines:
             line_geom = line.to_shapely
-            line_endpoints = {(line.x1, line.y1), (line.x2, line.y2)}
+            line_endpoints = {line.start_coord, line.end_coord}
+            
+            # Use STRtree to find points within tolerance of the line
+            nearby_indices = list(point_tree.query(line_geom.buffer(tolerance)))
             points_on_line = []
             
-            for point in points:
-                point_coord = (point.x, point.y)
-                if point_coord in line_endpoints:
+            for idx in nearby_indices:
+                point = points[int(idx)]
+                
+                # Skip if point is already an endpoint of this line
+                if point.coord in line_endpoints:
                     continue
                 
-                point_geom = point.to_shapely
-                if line_geom.dwithin(point_geom, tolerance):
+                # Check if point is actually within tolerance using dwithin
+                if line_geom.dwithin(point.to_shapely, tolerance):
                     points_on_line.append(point)
             
             if points_on_line:
                 line.is_split = True
                 
-                all_points = [(line.x1, line.y1)]
+                # Mark points that split lines as non-endpoints
+                for point in points_on_line:
+                    point.is_endpoint = False
+                
+                # Create ordered list of all points along the line
+                all_points = [line.start_coord]
                 for p in points_on_line:
-                    all_points.append((p.x, p.y))
-                all_points.append((line.x2, line.y2))
+                    all_points.append(p.coord)
+                all_points.append(line.end_coord)
                 
-                line_start = ShapelyLineString([(line.x1, line.y1), (line.x2, line.y2)])
-                all_points.sort(key=lambda p: line_start.project(ShapelyPoint(p)))
+                # Sort points by their position along the line
+                all_points.sort(key=lambda p: line_geom.project(ShapelyPoint(p)))
                 
+                # Create new line segments between consecutive points
                 for i in range(len(all_points) - 1):
-                    x1, y1 = all_points[i]
-                    x2, y2 = all_points[i + 1]
-                    
-                    new_line = Line(x1=x1, y1=y1, x2=x2, y2=y2)
+                    new_line = Line()
+                    new_line.coords = (all_points[i], all_points[i + 1])
                     self.session.add(new_line)
                     new_lines.append(new_line)
         
         self.session.commit()
+        
+        # Update all endpoint statuses after splitting
+        Point.update_all_endpoint_status(self.session)
+        self.session.commit()
+        
         return new_lines
     
     def create_igraph(self) -> ig.Graph:
-        points = self.session.query(Point).filter(Point.is_merged == False).all()
-        lines = self.session.query(Line).filter(Line.is_split == False).all()
+        points_stmt = select(Point).where(Point.is_merged == False)
+        points = self.session.execute(points_stmt).scalars().all()
+        
+        lines_stmt = select(Line).where(Line.is_split == False)
+        lines = self.session.execute(lines_stmt).scalars().all()
         
         point_to_index = {}
         vertex_names = []
@@ -148,8 +164,8 @@ class NetworkGraphBuilder:
         
         edges = []
         for line in lines:
-            start_coord = (line.x1, line.y1)
-            end_coord = (line.x2, line.y2)
+            start_coord = line.start_coord
+            end_coord = line.end_coord
             
             if start_coord in point_to_index and end_coord in point_to_index:
                 start_idx = point_to_index[start_coord]
