@@ -159,6 +159,30 @@ new_lines = builder.split_lines_on_points(tolerance=0.01)
 graph = builder.create_igraph()
 ```
 
+### Path Finding Operations
+
+```python
+# Find all possible paths between endpoints
+all_paths = builder.get_all_endpoint_paths()
+
+for path_info in all_paths:
+    print(f"Path from {path_info['start']} to {path_info['end']}:")
+    print(f"  Route: {path_info['path']}")
+    print(f"  Length: {path_info['length']} edges")
+
+# Find paths between specific endpoints
+start_coord = (0.0, 0.0)
+end_coord = (3.0, 0.0)
+specific_paths = builder.get_paths_between_endpoints(start_coord, end_coord)
+
+for path_info in specific_paths:
+    print(f"Path: {' -> '.join([str(coord) for coord in path_info['path']])}")
+
+# Get all endpoint pairs for analysis
+endpoint_pairs = builder.get_endpoint_pairs()
+print(f"Found {len(endpoint_pairs)} endpoint pairs")
+```
+
 ## Implementation Notes
 
 ### Hybrid Property Benefits
@@ -179,6 +203,7 @@ The NetworkGraphBuilder service has been refactored to use these hybrid properti
 - `Line.update_endpoint()` encapsulates coordinate update logic
 - `Line.start_coord` and `Line.end_coord` provide cleaner coordinate access
 - **STRtree spatial indexing** for efficient line splitting operations (O(n log n) vs O(n²))
+- **igraph integration** for pathfinding and network analysis operations
 
 ### Performance Optimization
 
@@ -200,6 +225,33 @@ nearby_indices = point_tree.query(line_geom.buffer(tolerance))
 - **Very large datasets** (2000 points): ~2.31s
 
 This provides significant performance improvements over the previous O(n²) nested loop approach, especially for large datasets.
+
+### Path Finding with igraph
+
+The NetworkGraphBuilder integrates with igraph to provide powerful pathfinding capabilities:
+
+**Available Methods:**
+- `get_all_endpoint_paths()`: Find all possible paths between every pair of endpoints
+- `get_paths_between_endpoints(start, end)`: Find all paths between two specific endpoints  
+- `get_endpoint_pairs()`: Get all possible endpoint coordinate pairs
+- `create_igraph()`: Create igraph representation with vertex attributes
+
+**Path Information Structure:**
+```python
+{
+    "start": (0.0, 0.0),           # Starting coordinate
+    "end": (3.0, 0.0),             # Ending coordinate
+    "path": [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)],  # Full path
+    "length": 3,                    # Number of edges
+    "vertex_indices": [0, 1, 2, 3]  # igraph vertex indices
+}
+```
+
+**Example Results:**
+- Simple linear network: Finds direct paths between endpoints
+- Complex networks with multiple routes: Discovers all alternative paths
+- Junction handling: Correctly navigates through intersection points
+- Endpoint classification: Only considers true endpoints as path terminals
 
 ### Database Compatibility
 

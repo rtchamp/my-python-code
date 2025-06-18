@@ -175,9 +175,71 @@ class NetworkGraphBuilder:
         graph = ig.Graph()
         graph.add_vertices(len(points))
         graph.vs["name"] = vertex_names
+        graph.vs["coord"] = [point.coord for point in points]
+        graph.vs["is_endpoint"] = [point.is_endpoint for point in points]
         graph.add_edges(edges)
         
         return graph
-    
+
+    def get_all_endpoint_paths(self) -> List[Dict]:
+        # Use get_endpoint_pairs() to get all endpoint coordinate pairs
+        endpoint_pairs = self.get_endpoint_pairs()
+        
+        all_paths = []
+        
+        # Find paths for each endpoint pair
+        for start_coord, end_coord in endpoint_pairs:
+            paths = self.get_paths_between_endpoints(start_coord, end_coord)
+            all_paths.extend(paths)
+        
+        return all_paths
+
+    def get_paths_between_endpoints(self, start_coord: tuple[float, float], end_coord: tuple[float, float]) -> List[Dict]:
+        graph = self.create_igraph()
+        
+        # Find vertex indices for start and end coordinates
+        start_idx = None
+        end_idx = None
+        
+        for i, coord in enumerate(graph.vs["coord"]):
+            if coord == start_coord:
+                start_idx = i
+            if coord == end_coord:
+                end_idx = i
+        
+        if start_idx is None or end_idx is None:
+            return []
+        
+        try:
+            paths = graph.get_all_simple_paths(start_idx, end_idx)
+            
+            path_results = []
+            for path_indices in paths:
+                path_coords = [graph.vs[idx]["coord"] for idx in path_indices]
+                path_info = {
+                    "start": start_coord,
+                    "end": end_coord,
+                    "path": path_coords,
+                    "length": len(path_indices) - 1,
+                    "vertex_indices": path_indices
+                }
+                path_results.append(path_info)
+            
+            return path_results
+            
+        except Exception:
+            return []
+
+    def get_endpoint_pairs(self) -> List[tuple[tuple[float, float], tuple[float, float]]]:
+        points_stmt = select(Point).where(Point.is_endpoint == True)
+        endpoints = self.session.execute(points_stmt).scalars().all()
+        
+        pairs = []
+        for i, point1 in enumerate(endpoints):
+            for point2 in endpoints[i+1:]:
+                pairs.append((point1.coord, point2.coord))
+        
+        return pairs
+
     def clear_cache(self):
         self._point_cache.clear() 
