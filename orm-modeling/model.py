@@ -1,8 +1,8 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, and_, func, select
+from sqlalchemy import ForeignKey, and_, func, select, JSON
 from sqlalchemy.ext.hybrid import hybrid_property
 from shapely.geometry import Point as ShapelyPoint, LineString as ShapelyLineString
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 class Base(DeclarativeBase):
     pass
@@ -15,6 +15,7 @@ class Point(Base):
     y: Mapped[float]
     is_merged: Mapped[bool] = mapped_column(default=False)
     merged_into_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tbl_point.id"), default=None)
+    metavar: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, default=None)
     
     merged_into: Mapped[Optional["Point"]] = relationship("Point", remote_side=[id], back_populates="merged_points")
     merged_points: Mapped[List["Point"]] = relationship("Point", back_populates="merged_into")
@@ -36,7 +37,28 @@ class Point(Base):
         other_x, other_y = other_coord
         return ((self.x - other_x) ** 2 + (self.y - other_y) ** 2) ** 0.5
 
+    def set_metadata(self, key: str, value: Any) -> None:
+        if self.metavar is None:
+            self.metavar = {}
+        self.metavar[key] = value
 
+    def get_metadata(self, key: str, default: Any = None) -> Any:
+        if self.metavar is None:
+            return default
+        return self.metavar.get(key, default)
+
+    def has_metadata(self, key: str) -> bool:
+        if self.metavar is None:
+            return False
+        return key in self.metavar
+
+    def remove_metadata(self, key: str) -> bool:
+        if self.metavar is None:
+            return False
+        if key in self.metavar:
+            del self.metavar[key]
+            return True
+        return False
 
     @property
     def to_shapely(self) -> ShapelyPoint:
@@ -51,6 +73,7 @@ class Line(Base):
     x2: Mapped[float]
     y2: Mapped[float]
     is_split: Mapped[bool] = mapped_column(default=False)
+    metavar: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, default=None)
 
     @hybrid_property
     def coords(self) -> tuple[tuple[float, float], tuple[float, float]]:  # type: ignore
@@ -93,6 +116,29 @@ class Line(Base):
         if self.x2 == old_x and self.y2 == old_y:
             self.x2 = new_x
             self.y2 = new_y
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        if self.metavar is None:
+            self.metavar = {}
+        self.metavar[key] = value
+
+    def get_metadata(self, key: str, default: Any = None) -> Any:
+        if self.metavar is None:
+            return default
+        return self.metavar.get(key, default)
+
+    def has_metadata(self, key: str) -> bool:
+        if self.metavar is None:
+            return False
+        return key in self.metavar
+
+    def remove_metadata(self, key: str) -> bool:
+        if self.metavar is None:
+            return False
+        if key in self.metavar:
+            del self.metavar[key]
+            return True
+        return False
 
     @property
     def to_shapely(self) -> ShapelyLineString:

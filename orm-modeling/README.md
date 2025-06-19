@@ -23,6 +23,33 @@ The models include sophisticated hybrid properties that work both at the Python 
 - `update_endpoint(old_coord, new_coord)`: Update line endpoints (accepts `tuple[float, float]`)
 - `to_shapely`: Convert to Shapely LineString geometry
 
+### Metadata Support
+
+Both Points and Lines can now store custom metadata in JSON format using the `metavar` field:
+
+**Point Metadata:**
+- `metavar` field: JSON storage for custom attributes
+- `set_metadata(key, value)`: Add/update metadata
+- `get_metadata(key, default)`: Retrieve metadata with optional default
+- `has_metadata(key)`: Check if metadata key exists
+- `remove_metadata(key)`: Remove metadata key
+
+**Line Metadata:**
+- `metavar` field: JSON storage for custom attributes
+- `set_metadata(key, value)`: Add/update metadata
+- `get_metadata(key, default)`: Retrieve metadata with optional default
+- `has_metadata(key)`: Check if metadata key exists
+- `remove_metadata(key)`: Remove metadata key
+
+**Smart Metadata Merging:**
+When points are merged during `merge_nearby_points()`, their metadata is intelligently combined:
+- **Lists**: Concatenated with duplicates removed (e.g., services, facilities)
+- **Numbers**: Maximum value used for capacity, priority, area, beds
+- **Booleans**: OR logic for emergency, parking, traffic_light features
+- **Strings**: Combined with "/" separator for names and types
+- **New Keys**: Added from source to target point
+- **Conflicts**: Customizable merge strategies via `_merge_metadata_values()`
+
 ### Endpoint Classification
 
 Endpoints are automatically determined by graph degree analysis using igraph:
@@ -180,6 +207,75 @@ for path_info in specific_paths:
 # Get all endpoint pairs for analysis
 endpoint_pairs = builder.get_endpoint_pairs()
 print(f"Found {len(endpoint_pairs)} endpoint pairs")
+```
+
+### Conditional Path Finding
+
+Find paths with specific endpoint conditions and intermediate node avoidance:
+
+```python
+# Find paths only between points with specific metadata
+endpoint_filter = {"is_end": True}
+filtered_paths = builder.get_all_endpoint_paths(endpoint_filter)
+
+for path_info in filtered_paths:
+    print(f"Path: {path_info['start']} → {path_info['end']}")
+    print(f"  Route: {path_info['path']}")
+
+# Find paths between specific points while avoiding intermediate nodes
+start_coord = (0.0, 0.0)
+end_coord = (3.0, 0.0)
+avoid_filter = {"is_end": True}  # Avoid passing through other is_end=True points
+
+paths = builder.get_paths_between_endpoints(
+    start_coord, 
+    end_coord, 
+    avoid_intermediate_filter=avoid_filter
+)
+
+# Example use cases:
+# - Transit networks: Find routes between stations without passing through other stations
+# - Supply chains: Find paths between warehouses avoiding other warehouses
+# - Network analysis: Find direct connections between specific node types
+```
+
+### Metadata Usage Examples
+
+```python
+# Point metadata
+point = Point(x=0.0, y=0.0)
+point.set_metadata("type", "intersection")
+point.set_metadata("services", ["bus", "taxi"])
+point.set_metadata("capacity", 1000)
+
+# Line metadata
+line = Line(x1=0.0, y1=0.0, x2=1.0, y2=0.0)
+line.set_metadata("road_type", "highway")
+line.set_metadata("speed_limit", 80)
+line.set_metadata("lanes", 4)
+line.set_metadata("toll", True)
+
+# Create lines with metadata
+coordinate_pairs = [
+    ((0.0, 0.0), (1.0, 0.0)),
+    ((1.0, 0.0), (2.0, 1.0))
+]
+line_metadata = [
+    {"road_type": "highway", "speed_limit": 80, "lanes": 4},
+    {"road_type": "street", "speed_limit": 50, "lanes": 2}
+]
+lines = builder.create_lines_from_coordinates(
+    coordinate_pairs,
+    line_metadata=line_metadata
+)
+
+# Smart metadata merging during point consolidation
+# When points are merged, metadata is intelligently combined:
+# - Lists: Combined and deduplicated
+# - Numbers: Maximum values used for capacity/priority
+# - Booleans: OR logic for features
+# - Strings: Combined with "/" separator
+merged = builder.merge_nearby_points(margin=0.1)
 ```
 
 ## Implementation Notes

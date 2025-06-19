@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, select
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any, Optional
 import igraph as ig
 import math
 from shapely.geometry import Point as ShapelyPoint, LineString as ShapelyLineString
@@ -12,7 +12,11 @@ class NetworkGraphBuilder:
         self.session = session
         self._point_cache: Dict[Tuple[float, float], Point] = {}
     
-    def create_lines_from_coordinates(self, coordinate_pairs: List[Tuple[Tuple[float, float], Tuple[float, float]]]) -> List[Line]:
+    def create_lines_from_coordinates(
+        self, 
+        coordinate_pairs: List[Tuple[Tuple[float, float], Tuple[float, float]]], 
+        line_metadata: Optional[List[Dict[str, Any]]] = None
+    ) -> List[Line]:
         created_lines = []
         
         unique_coords = set()
@@ -25,12 +29,18 @@ class NetworkGraphBuilder:
                 point = self._get_or_create_point(coord[0], coord[1])
                 self._point_cache[coord] = point
         
-        for p0, p1 in coordinate_pairs:
+        for i, (p0, p1) in enumerate(coordinate_pairs):
             point0 = self._point_cache[p0]
             point1 = self._point_cache[p1]
             
             line = Line()
             line.coords = (point0.coord, point1.coord)
+            
+            # Add metadata if provided
+            if line_metadata and i < len(line_metadata):
+                for key, value in line_metadata[i].items():
+                    line.set_metadata(key, value)
+            
             self.session.add(line)
             created_lines.append(line)
         
@@ -51,6 +61,55 @@ class NetworkGraphBuilder:
         
         return new_point
     
+    def _merge_point_metadata(self, target_point: Point, source_point: Point) -> None:
+        if source_point.metavar is None:
+            return
+        
+        if target_point.metavar is None:
+            target_point.metavar = {}
+        
+        # Merge metadata from source to target
+        for key, value in source_point.metavar.items():
+            if key not in target_point.metavar:
+                # Add new metadata if key doesn't exist
+                target_point.set_metadata(key, value)
+            else:
+                # Handle conflicts - you can customize this logic
+                existing_value = target_point.get_metadata(key)
+                merged_value = self._merge_metadata_values(key, existing_value, value)
+                target_point.set_metadata(key, merged_value)
+        
+        # Mark the target_point as modified for SQLAlchemy to track the change
+        from sqlalchemy.orm import attributes
+        attributes.flag_modified(target_point, 'metavar')
+    
+    def _merge_metadata_values(self, key: str, existing_value: Any, new_value: Any) -> Any:
+        # Default merge strategy - you can customize this based on your needs
+        
+        # For lists, concatenate and remove duplicates
+        if isinstance(existing_value, list) and isinstance(new_value, list):
+            combined = existing_value + new_value
+            return list(dict.fromkeys(combined))  # Remove duplicates while preserving order
+        
+        # For numbers, take the maximum (useful for capacity, priority, etc.)
+        if isinstance(existing_value, (int, float)) and isinstance(new_value, (int, float)):
+            if key in ['capacity', 'priority_level', 'area', 'beds']:
+                return max(existing_value, new_value)
+        
+        # For booleans, use OR logic (if either is True, result is True)
+        if isinstance(existing_value, bool) and isinstance(new_value, bool):
+            if key in ['emergency', 'parking', 'traffic_light']:
+                return existing_value or new_value
+        
+        # For strings, concatenate with separator if different
+        if isinstance(existing_value, str) and isinstance(new_value, str):
+            if existing_value != new_value:
+                if key in ['name', 'type']:
+                    return f"{existing_value} / {new_value}"
+                
+        # Default: keep existing value (first wins)
+        return existing_value
+    
     def merge_nearby_points(self, margin: float) -> List[Point]:
         stmt = select(Point).where(Point.is_merged == False)
         points = self.session.execute(stmt).scalars().all()
@@ -67,9 +126,15 @@ class NetworkGraphBuilder:
                 distance = point1.distance_to_point(point2.coord)
                 
                 if distance <= margin:
+                    # Merge metadata from point2 to point1
+                    self._merge_point_metadata(point1, point2)
+                    
                     point2.is_merged = True
                     point2.merged_into = point1
                     merged_points.append(point2)
+                    
+                    # Force SQLAlchemy to track the metadata changes
+                    self.session.flush()
                     
                     lines_stmt = select(Line).where(Line.has_endpoint(point2.coord))
                     lines_to_update = self.session.execute(lines_stmt).scalars().all()
@@ -173,11 +238,26 @@ class NetworkGraphBuilder:
         
         return graph
 
-    def get_all_endpoint_paths(self) -> List[Dict]:
+    def get_all_endpoint_paths(self, endpoint_filter: Optional[Dict[str, Any]] = None) -> List[Dict]:
         graph = self.create_igraph()
         
         # Find endpoints based on graph degree (nodes with only 1 connection)
         endpoint_indices = [i for i in range(len(graph.vs)) if graph.degree(i) == 1]
+        
+        # Apply endpoint filter if provided
+        if endpoint_filter:
+            filtered_endpoints = []
+            points_stmt = select(Point).where(Point.is_merged == False)
+            points = self.session.execute(points_stmt).scalars().all()
+            
+            for idx in endpoint_indices:
+                coord = graph.vs[idx]["coord"]
+                # Find the point with this coordinate
+                point = next((p for p in points if p.coord == coord), None)
+                if point and self._matches_filter(point, endpoint_filter):
+                    filtered_endpoints.append(idx)
+            
+            endpoint_indices = filtered_endpoints
         
         all_paths = []
         
@@ -189,6 +269,10 @@ class NetworkGraphBuilder:
                     paths = graph.get_all_simple_paths(start_idx, end_idx)
                     
                     for path_indices in paths:
+                        # Check if path passes through forbidden intermediate nodes
+                        if endpoint_filter and self._path_has_forbidden_intermediate(path_indices, graph, endpoint_filter):
+                            continue
+                            
                         path_coords = [graph.vs[idx]["coord"] for idx in path_indices]
                         path_info = {
                             "start": graph.vs[start_idx]["coord"],
@@ -205,7 +289,12 @@ class NetworkGraphBuilder:
         
         return all_paths
 
-    def get_paths_between_endpoints(self, start_coord: tuple[float, float], end_coord: tuple[float, float]) -> List[Dict]:
+    def get_paths_between_endpoints(
+        self, 
+        start_coord: tuple[float, float], 
+        end_coord: tuple[float, float], 
+        avoid_intermediate_filter: Optional[Dict[str, Any]] = None
+    ) -> List[Dict]:
         graph = self.create_igraph()
         
         # Find vertex indices for start and end coordinates
@@ -226,6 +315,10 @@ class NetworkGraphBuilder:
             
             path_results = []
             for path_indices in paths:
+                # Check if path passes through forbidden intermediate nodes
+                if avoid_intermediate_filter and self._path_has_forbidden_intermediate(path_indices, graph, avoid_intermediate_filter):
+                    continue
+                    
                 path_coords = [graph.vs[idx]["coord"] for idx in path_indices]
                 path_info = {
                     "start": start_coord,
@@ -255,5 +348,35 @@ class NetworkGraphBuilder:
         
         return pairs
 
+    def _matches_filter(self, point: Point, filter_conditions: Dict[str, Any]) -> bool:
+        """Check if a point matches the given filter conditions"""
+        if not point.metavar:
+            return False
+        
+        for key, expected_value in filter_conditions.items():
+            actual_value = point.get_metadata(key)
+            if actual_value != expected_value:
+                return False
+        
+        return True
+    
+    def _path_has_forbidden_intermediate(self, path_indices: List[int], graph: ig.Graph, endpoint_filter: Dict[str, Any]) -> bool:
+        """Check if path passes through intermediate nodes that match the endpoint filter"""
+        if len(path_indices) <= 2:
+            return False  # No intermediate nodes
+        
+        # Get all points for checking
+        points_stmt = select(Point).where(Point.is_merged == False)
+        points = self.session.execute(points_stmt).scalars().all()
+        
+        # Check intermediate nodes (excluding start and end)
+        for idx in path_indices[1:-1]:
+            coord = graph.vs[idx]["coord"]
+            point = next((p for p in points if p.coord == coord), None)
+            if point and self._matches_filter(point, endpoint_filter):
+                return True  # Found forbidden intermediate node
+        
+        return False
+    
     def clear_cache(self):
         self._point_cache.clear() 
