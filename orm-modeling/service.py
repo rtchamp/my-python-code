@@ -238,39 +238,94 @@ class NetworkGraphBuilder:
         
         return graph
 
-    def get_all_endpoint_paths(self, endpoint_filter: Optional[Dict[str, Any]] = None) -> List[Dict]:
+    def get_all_endpoint_paths(
+        self, 
+        endpoint_filter: Optional[Dict[str, Any]] = None,
+        start_filter: Optional[Dict[str, Any]] = None,
+        end_filter: Optional[Dict[str, Any]] = None
+    ) -> List[Dict]:
         graph = self.create_igraph()
         
-        # Find endpoints based on graph degree (nodes with only 1 connection)
-        endpoint_indices = [i for i in range(len(graph.vs)) if graph.degree(i) == 1]
+        # Get all points for filtering
+        points_stmt = select(Point).where(Point.is_merged == False)
+        points = self.session.execute(points_stmt).scalars().all()
         
-        # Apply endpoint filter if provided
-        if endpoint_filter:
-            filtered_endpoints = []
-            points_stmt = select(Point).where(Point.is_merged == False)
-            points = self.session.execute(points_stmt).scalars().all()
+        # Determine start and end points
+        if start_filter is not None or end_filter is not None:
+            # Use separate start and end filters
+            start_indices = []
+            end_indices = []
             
-            for idx in endpoint_indices:
-                coord = graph.vs[idx]["coord"]
-                # Find the point with this coordinate
+            for i in range(len(graph.vs)):
+                coord = graph.vs[i]["coord"]
                 point = next((p for p in points if p.coord == coord), None)
-                if point and self._matches_filter(point, endpoint_filter):
-                    filtered_endpoints.append(idx)
+                if not point:
+                    continue
+                
+                # Check for start points
+                if start_filter is not None:
+                    # Start condition: degree=1 AND (no is_end OR is_end=False)
+                    if graph.degree(i) == 1:
+                        is_end_value = point.get_metadata('is_end')
+                        if is_end_value is None or is_end_value == False:
+                            # If start_filter is empty dict, accept all that meet degree+is_end criteria
+                            if not start_filter or self._matches_filter(point, start_filter):
+                                start_indices.append(i)
+                
+                # Check for end points
+                if end_filter is not None:
+                    if self._matches_filter(point, end_filter):
+                        end_indices.append(i)
             
-            endpoint_indices = filtered_endpoints
+            # Use the filtered start and end points
+            start_points = start_indices
+            end_points = end_indices
+            
+        else:
+            # Fall back to original behavior: degree-1 endpoints
+            endpoint_indices = [i for i in range(len(graph.vs)) if graph.degree(i) == 1]
+            
+            # Apply legacy endpoint filter if provided
+            if endpoint_filter:
+                filtered_endpoints = []
+                
+                for idx in endpoint_indices:
+                    coord = graph.vs[idx]["coord"]
+                    point = next((p for p in points if p.coord == coord), None)
+                    if point and self._matches_filter(point, endpoint_filter):
+                        filtered_endpoints.append(idx)
+                
+                endpoint_indices = filtered_endpoints
+            
+            # Use same points for both start and end
+            start_points = endpoint_indices
+            end_points = endpoint_indices
         
         all_paths = []
         
-        # Find paths between all pairs of endpoints
-        for i, start_idx in enumerate(endpoint_indices):
-            for end_idx in endpoint_indices[i+1:]:  # Avoid duplicate pairs
+        # Find paths from start points to end points
+        for start_idx in start_points:
+            for end_idx in end_points:
+                # Skip if start and end are the same point
+                if start_idx == end_idx:
+                    continue
+                
+                # If using separate start/end filters, prevent end-to-end connections
+                if start_filter is not None or end_filter is not None:
+                    # Check if start point is also an end point (should be excluded)
+                    start_coord = graph.vs[start_idx]["coord"]
+                    start_point = next((p for p in points if p.coord == start_coord), None)
+                    if start_point and end_filter and self._matches_filter(start_point, end_filter):
+                        continue  # Skip if start point is also an end point
+                
                 try:
-                    # Find all simple paths between endpoints
+                    # Find all simple paths between start and end
                     paths = graph.get_all_simple_paths(start_idx, end_idx)
                     
                     for path_indices in paths:
                         # Check if path passes through forbidden intermediate nodes
-                        if endpoint_filter and self._path_has_forbidden_intermediate(path_indices, graph, endpoint_filter):
+                        forbidden_filter = end_filter if (start_filter is not None or end_filter is not None) else endpoint_filter
+                        if forbidden_filter and self._path_has_forbidden_intermediate(path_indices, graph, forbidden_filter):
                             continue
                             
                         path_coords = [graph.vs[idx]["coord"] for idx in path_indices]
@@ -378,5 +433,74 @@ class NetworkGraphBuilder:
         
         return False
     
+    def get_paths_between_point_groups(
+        self, 
+        start_points: List[tuple[float, float]], 
+        end_points: List[tuple[float, float]],
+        avoid_intermediate_filter: Optional[Dict[str, Any]] = None
+    ) -> List[Dict]:
+        """
+        Find all paths from any start point to any end point.
+        
+        Args:
+            start_points: List of coordinate tuples for start points
+            end_points: List of coordinate tuples for end points  
+            avoid_intermediate_filter: Optional filter to avoid certain intermediate nodes
+            
+        Returns:
+            List of path dictionaries with start, end, path, length, vertex_indices
+        """
+        graph = self.create_igraph()
+        
+        # Convert coordinates to graph indices
+        start_indices = []
+        end_indices = []
+        
+        for coord in start_points:
+            for i, graph_coord in enumerate(graph.vs["coord"]):
+                if graph_coord == coord:
+                    start_indices.append(i)
+                    break
+        
+        for coord in end_points:
+            for i, graph_coord in enumerate(graph.vs["coord"]):
+                if graph_coord == coord:
+                    end_indices.append(i)
+                    break
+        
+        all_paths = []
+        
+        # Find paths from each start point to each end point
+        for start_idx in start_indices:
+            for end_idx in end_indices:
+                # Skip if start and end are the same point
+                if start_idx == end_idx:
+                    continue
+                
+                try:
+                    # Find all simple paths between start and end
+                    paths = graph.get_all_simple_paths(start_idx, end_idx)
+                    
+                    for path_indices in paths:
+                        # Check if path passes through forbidden intermediate nodes
+                        if avoid_intermediate_filter and self._path_has_forbidden_intermediate(path_indices, graph, avoid_intermediate_filter):
+                            continue
+                            
+                        path_coords = [graph.vs[idx]["coord"] for idx in path_indices]
+                        path_info = {
+                            "start": graph.vs[start_idx]["coord"],
+                            "end": graph.vs[end_idx]["coord"], 
+                            "path": path_coords,
+                            "length": len(path_indices) - 1,  # Number of edges
+                            "vertex_indices": path_indices
+                        }
+                        all_paths.append(path_info)
+                        
+                except Exception:
+                    # No path exists between these points
+                    continue
+        
+        return all_paths
+
     def clear_cache(self):
         self._point_cache.clear() 
